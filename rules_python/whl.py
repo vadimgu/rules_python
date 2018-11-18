@@ -14,6 +14,8 @@
 """The whl modules defines classes for interacting with Python packages."""
 
 import argparse
+import collections
+import rfc822
 import json
 import os
 import pkg_resources
@@ -107,9 +109,45 @@ class Wheel(object):
 
   # _parse_metadata parses METADATA files according to https://www.python.org/dev/peps/pep-0314/
   def _parse_metadata(self, content):
-    # TODO: handle fields other than just name
-    name_pattern = re.compile('Name: (.*)')
-    return { 'name': name_pattern.search(content).group(1) }
+    def get_header_value(header):
+      return header.strip().split(':', 2)[1].strip()
+    metadata = {}
+    pkg_info = rfc822.Message(content)
+    metadata['name'] = pkg_info.get('Name')
+    extras = [get_header_value(h) for h in pkg_info.getallmatchingheaders('Provides-Extra')]
+    if extras:
+      metadata['extras'] = list(set(extras))
+
+    reqs_dist = [get_header_value(h) for h in pkg_info.getallmatchingheaders('Requires-Dist')]
+    requires = collections.defaultdict(set)
+    for value in sorted(reqs_dist):
+      extra_match = EXTRA_RE.search(value)
+      if extra_match:
+        groupdict = extra_match.groupdict()
+        condition = groupdict['condition']
+        extra = groupdict['extra']
+        package = groupdict['package']
+        if condition.endswith(' and '):
+          condition = condition[:-5]
+      else:
+        condition, extra = None, None
+        package = value
+      key = MayRequiresKey(condition, extra)
+      requires[key].add(package)
+
+    if requires:
+      metadata['run_requires'] = []
+      for key, value in requires.items():
+        requirement = {
+          'requires': list(value)
+        }
+        if key.extra:
+          requirement['extra'] = key.extra
+        if key.condition:
+          requirement['environment'] = key.condition
+        metadata['run_requires'].append(requirement)
+
+    return metadata
 
 
 parser = argparse.ArgumentParser(
