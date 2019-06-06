@@ -21,6 +21,7 @@ import os
 import pkg_resources
 import re
 import zipfile
+import sys
 
 EXTRA_RE = re.compile("""^(?P<package>.*?)(;\s*(?P<condition>.*?)(extra == '(?P<extra>.*?)')?)$""")
 MayRequiresKey = collections.namedtuple('MayRequiresKey', ('condition', 'extra'))
@@ -49,7 +50,7 @@ class Wheel(object):
 
   def repository_name(self):
     # Returns the canonical name of the Bazel repository for this package.
-    canonical = 'pypi__{}_{}'.format(self.distribution(), self.version())
+    canonical = 'pypi__py{}__{}_{}'.format(sys.version_info.major, self.distribution(), self.version())
     # Escape any illegal characters with underscore.
     return re.sub('[-.+]', '_', canonical)
 
@@ -113,7 +114,12 @@ class Wheel(object):
   # _parse_metadata parses METADATA files according to https://www.python.org/dev/peps/pep-0314/
   def _parse_metadata(self, content):
     metadata = {}
-    pkg_info = email.parser.Parser().parse(content)
+    content_str = content.read()
+    try:
+      pkg_info = email.parser.Parser().parsestr(content_str)
+    except:
+      pkg_info = email.parser.BytesParser().parsebytes(content_str)
+
     metadata['name'] = pkg_info.get('Name')
     extras = pkg_info.get_all('Provides-Extra')
     if extras:
